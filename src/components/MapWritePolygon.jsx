@@ -1,15 +1,23 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Button, Alert, Space } from "antd"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import "leaflet-draw/dist/leaflet.draw.css"
 import "leaflet-draw"
 import "leaflet-control-geocoder/dist/Control.Geocoder.css"
 import "leaflet-control-geocoder"
-import { AlertCircle, Maximize2, Minimize2, Undo2, Redo2, Trash2 } from "lucide-react"
+import {
+    AlertCircleOutlined,
+    FullscreenOutlined,
+    FullscreenExitOutlined,
+    UndoOutlined,
+    RedoOutlined,
+    DeleteOutlined,
+} from "@ant-design/icons"
 
-export function MapComponent({ onAreaSelect }) {
+export function MapWritePolygon({ onAreaSelect, onPolygonChange, readOnly = false, initialPolygon = null }) {
     // Refs
     const refs = useRef({
         map: null,
@@ -115,16 +123,14 @@ export function MapComponent({ onAreaSelect }) {
         layersRef.current.street.addTo(refs.current.map)
 
         // Add search control
-        const geocoder = (L.Control)
-            .geocoder({
-                defaultMarkGeocode: false,
-                placeholder: "Manzilni qidiring...",
-                errorMessage: "Manzil topilmadi",
-                suggestMinLength: 3,
-                suggestTimeout: 250,
-                position: "topleft",
-            })
-            .addTo(refs.current.map)
+        const geocoder = L.Control.geocoder({
+            defaultMarkGeocode: false,
+            placeholder: "Manzilni qidiring...",
+            errorMessage: "Manzil topilmadi",
+            suggestMinLength: 3,
+            suggestTimeout: 250,
+            position: "topleft",
+        }).addTo(refs.current.map)
 
         geocoder.on("markgeocode", (e) => {
             const bbox = e.geocode.bbox
@@ -138,35 +144,51 @@ export function MapComponent({ onAreaSelect }) {
         refs.current.drawnItems = new L.FeatureGroup()
         refs.current.map.addLayer(refs.current.drawnItems)
 
-        // Setup draw control
-        const drawControl = new L.Control.Draw({
-            draw: {
-                polygon: {
-                    allowIntersection: false,
-                    drawError: {
-                        color: "#e1e4e8",
-                        message: "<strong>Xato!</strong> Maydonlar kesishmasligi kerak!",
-                    },
-                    shapeOptions: {
-                        color: "#0ea5e9",
-                        fillOpacity: 0.2,
-                    },
-                },
-                polyline: false,
-                rectangle: false,
-                circle: false,
-                marker: false,
-                circlemarker: false,
-            },
-            edit: {
-                featureGroup: refs.current.drawnItems,
-                poly: {
-                    allowIntersection: false,
-                },
-            },
-        })
+        // Handle initial polygon
+        if (initialPolygon && refs.current.map && refs.current.drawnItems) {
+            const layer = L.geoJSON(initialPolygon)
+            refs.current.drawnItems.addLayer(layer)
 
-        refs.current.map.addControl(drawControl)
+            const coordinates = initialPolygon.geometry.coordinates[0]
+            const latLngs = coordinates.map((coord) => L.latLng(coord[1], coord[0]))
+            const hectares = calculateArea(latLngs)
+            updateArea(hectares)
+
+            // Fit map bounds to show the polygon
+            refs.current.map.fitBounds(layer.getBounds())
+        }
+
+        // Only show drawing controls if not in read-only mode
+        let drawControl
+        if (!readOnly) {
+            drawControl = new L.Control.Draw({
+                draw: {
+                    polygon: {
+                        allowIntersection: false,
+                        drawError: {
+                            color: "#ff4d4f",
+                            message: "<strong>Xato!</strong> Maydonlar kesishmasligi kerak!",
+                        },
+                        shapeOptions: {
+                            color: "#1890ff",
+                            fillOpacity: 0.2,
+                        },
+                    },
+                    polyline: false,
+                    rectangle: false,
+                    circle: false,
+                    marker: false,
+                    circlemarker: false,
+                },
+                edit: {
+                    featureGroup: refs.current.drawnItems,
+                    poly: {
+                        allowIntersection: false,
+                    },
+                },
+            })
+            refs.current.map.addControl(drawControl)
+        }
 
         // Drawing events
         let drawingTooltip
@@ -178,7 +200,7 @@ export function MapComponent({ onAreaSelect }) {
             const handleMouseMove = (e) => {
                 if (!drawingTooltip) return
 
-                const draw = (drawControl)._toolbars.draw._activeMode
+                const draw = drawControl._toolbars.draw._activeMode
                 if (draw && draw._markers) {
                     const points = draw._markers.map((marker) => marker._latlng)
                     points.push(e.latlng)
@@ -208,14 +230,18 @@ export function MapComponent({ onAreaSelect }) {
             updateArea(hectares)
             saveToHistory(layer)
 
+            // Save GeoJSON data
+            const geoJSON = layer.toGeoJSON()
+            onPolygonChange(geoJSON)
+
             // Add popup
             layer
                 .bindPopup(`
-        <div class="text-center">
-          <strong>Maydon:</strong> ${hectares.toFixed(2)} gektar<br>
-          <small>Tahrirlash uchun ustiga bosing</small>
-        </div>
-      `)
+                    <div style="text-align: center">
+                        <strong>Maydon:</strong> ${hectares.toFixed(2)} gektar<br>
+                        <small>Tahrirlash uchun ustiga bosing</small>
+                    </div>
+                `)
                 .openPopup()
         })
 
@@ -228,11 +254,11 @@ export function MapComponent({ onAreaSelect }) {
                 totalArea += area
 
                 layer.setPopupContent(`
-          <div class="text-center">
-            <strong>Maydon:</strong> ${area.toFixed(2)} gektar<br>
-            <small>Tahrirlash uchun ustiga bosing</small>
-          </div>
-        `)
+                    <div style="text-align: center">
+                        <strong>Maydon:</strong> ${area.toFixed(2)} gektar<br>
+                        <small>Tahrirlash uchun ustiga bosing</small>
+                    </div>
+                `)
             })
 
             updateArea(totalArea)
@@ -262,9 +288,11 @@ export function MapComponent({ onAreaSelect }) {
                 const container = L.DomUtil.create("div", "leaflet-bar leaflet-control")
                 const button = L.DomUtil.create("a", "current-location-btn", container)
 
-                button.innerHTML = `<span class="flex items-center justify-center h-full w-full">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
-        </span>`
+                button.innerHTML = `<span style="display: flex; align-items: center; justify-content: center; height: 100%; width: 100%;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                        <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+                    </svg>
+                </span>`
                 button.href = "#"
                 button.title = "Mening joylashuvim"
 
@@ -281,7 +309,8 @@ export function MapComponent({ onAreaSelect }) {
                 return container
             },
         })
-            ; new (L.Control.CurrentLocation)({ position: "topright" }).addTo(refs.current.map)
+
+        new L.Control.CurrentLocation({ position: "topright" }).addTo(refs.current.map)
 
         // Cleanup
         return () => {
@@ -290,7 +319,7 @@ export function MapComponent({ onAreaSelect }) {
                 refs.current.map = null
             }
         }
-    }, [calculateArea, saveToHistory, updateArea])
+    }, [calculateArea, saveToHistory, updateArea, initialPolygon, onPolygonChange, readOnly])
 
     // Handle map type changes
     useEffect(() => {
@@ -343,7 +372,6 @@ export function MapComponent({ onAreaSelect }) {
                 const layer = L.geoJSON(previousState)
                 refs.current.drawnItems?.addLayer(layer)
 
-                // Get coordinates from GeoJSON
                 const coordinates = previousState.geometry.coordinates[0]
                 const latLngs = coordinates.map((coord) => L.latLng(coord[1], coord[0]))
 
@@ -368,7 +396,6 @@ export function MapComponent({ onAreaSelect }) {
             const layer = L.geoJSON(nextState)
             refs.current.drawnItems?.addLayer(layer)
 
-            // Get coordinates from GeoJSON
             const coordinates = nextState.geometry.coordinates[0]
             const latLngs = coordinates.map((coord) => L.latLng(coord[1], coord[0]))
 
@@ -385,90 +412,79 @@ export function MapComponent({ onAreaSelect }) {
         updateHistoryButtons()
     }, [updateArea, updateHistoryButtons])
 
-    // Render
     return (
         <div className="relative">
             {/* Instructions */}
-            <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
-                <AlertCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                <div className="text-sm text-blue-700">
-                    <p className="font-medium mb-1">Maydonni belgilash bo'yicha ko'rsatmalar:</p>
-                    <ol className="list-decimal list-inside space-y-1">
-                        <li>Chap tomondagi chizish asbobini tanlang</li>
-                        <li>Xaritada nuqtalarni belgilab chiqing</li>
-                        <li>Maydonni yakunlash uchun birinchi nuqtaga qaytib bosing</li>
-                        <li>Maydonni tahrirlash uchun ustiga ikki marta bosing</li>
-                    </ol>
-                </div>
-            </div>
+            <Alert
+                message={
+                    <div>
+                        <p className="font-medium mb-1">Maydonni belgilash bo'yicha ko'rsatmalar:</p>
+                        <ol className="list-decimal list-inside space-y-1">
+                            <li>Chap tomondagi chizish asbobini tanlang</li>
+                            <li>Xaritada nuqtalarni belgilab chiqing</li>
+                            <li>Maydonni yakunlash uchun birinchi nuqtaga qaytib bosing</li>
+                            <li>Maydonni tahrirlash uchun ustiga ikki marta bosing</li>
+                        </ol>
+                    </div>
+                }
+                type="info"
+                showIcon
+                // icon={<AlertCircleOutlined />}
+                className="mb-4"
+            />
 
             {/* Map Controls */}
-            <div className="flex flex-wrap gap-2 mb-4">
-                <button
-                    className={`px-4 py-2 rounded ${mapType === "street" ? "bg-blue-500 text-white" : "bg-gray-200"}`}
-                    onClick={() => setMapType("street")}
-                >
-                    Ko'cha
-                </button>
-                <button
-                    className={`px-4 py-2 rounded ${mapType === "satellite" ? "bg-blue-500 text-white" : "bg-gray-200"}`}
-                    onClick={() => setMapType("satellite")}
-                >
-                    Sun'iy yo'ldosh
-                </button>
-                <button
-                    className={`px-4 py-2 rounded ${mapType === "hybrid" ? "bg-blue-500 text-white" : "bg-gray-200"}`}
-                    onClick={() => setMapType("hybrid")}
-                >
-                    Gibrid
-                </button>
+            <Space className="mb-4 w-full justify-between">
+                <Space>
+                    <Button type={mapType === "street" ? "primary" : "default"} onClick={() => setMapType("street")}>
+                        Ko'cha
+                    </Button>
+                    <Button type={mapType === "satellite" ? "primary" : "default"} onClick={() => setMapType("satellite")}>
+                        Sun'iy yo'ldosh
+                    </Button>
+                    <Button type={mapType === "hybrid" ? "primary" : "default"} onClick={() => setMapType("hybrid")}>
+                        Gibrid
+                    </Button>
+                </Space>
 
-                <div className="ml-auto flex gap-2">
-                    <button
-                        className={`px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed`}
-                        onClick={handleUndo}
-                        disabled={!canUndo}
-                        title="Ortga qaytarish"
-                    >
-                        <Undo2 className="w-5 h-5" />
-                    </button>
-                    <button
-                        className={`px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed`}
-                        onClick={handleRedo}
-                        disabled={!canRedo}
-                        title="Oldinga qaytarish"
-                    >
-                        <Redo2 className="w-5 h-5" />
-                    </button>
-                    <button
-                        className="px-3 py-2 rounded bg-red-100 hover:bg-red-200 text-red-600"
-                        onClick={handleClear}
-                        title="Tozalash"
-                    >
-                        <Trash2 className="w-5 h-5" />
-                    </button>
-                    <button
-                        className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200"
+                <Space>
+                    <Button icon={<UndoOutlined />} onClick={handleUndo} disabled={!canUndo} title="Ortga qaytarish" />
+                    <Button icon={<RedoOutlined />} onClick={handleRedo} disabled={!canRedo} title="Oldinga qaytarish" />
+                    <Button danger icon={<DeleteOutlined />} onClick={handleClear} title="Tozalash" />
+                    <Button
+                        icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
                         onClick={toggleFullscreen}
                         title={isFullscreen ? "Kichraytirish" : "Kattalashtirish"}
-                    >
-                        {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-                    </button>
-                </div>
-            </div>
+                    />
+                </Space>
+            </Space>
 
             {/* Current Area Display */}
             {currentArea > 0 && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-white px-4 py-2 rounded-full shadow-lg border">
-                    <span className="font-medium">Tanlangan maydon: </span>
-                    <span className="text-blue-600">{currentArea.toFixed(2)} gektar</span>
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000]">
+                    <Alert
+                        message={
+                            <>
+                                <span className="font-medium">Tanlangan maydon: </span>
+                                <span className="text-blue-600">{currentArea.toFixed(2)} gektar</span>
+                            </>
+                        }
+                        type="info"
+                    />
                 </div>
             )}
 
             {/* Loading Indicator */}
             {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-[1001] rounded-lg">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                    <div className="ant-spin ant-spin-lg ant-spin-spinning">
+                        <span className="ant-spin-dot ant-spin-dot-spin">
+                            <i className="ant-spin-dot-item"></i>
+                            <i className="ant-spin-dot-item"></i>
+                            <i className="ant-spin-dot-item"></i>
+                            <i className="ant-spin-dot-item"></i>
+                        </span>
+                    </div>
                 </div>
             )}
 

@@ -1,18 +1,18 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { Button, Space } from "antd"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import "leaflet-draw/dist/leaflet.draw.css"
 import "leaflet-draw"
+import "leaflet-geometryutil"
 
-
-
-export function MapComponent({ onAreaSelect, savedArea }) {
-  const mapRef = useRef (null)
+export function MapComponentDetails({ initialPolygon, readOnly = true }) {
+  const mapRef = useRef(null)
   const drawnItemsRef = useRef(null)
   const [mapType, setMapType] = useState("street")
-  const layersRef = useRef ({
+  const layersRef = useRef({
     street: null,
     satellite: null,
     hybrid: null,
@@ -20,7 +20,13 @@ export function MapComponent({ onAreaSelect, savedArea }) {
 
   useEffect(() => {
     if (!mapRef.current) {
-      mapRef.current = L.map("map").setView([41.3111, 69.2406], 13)
+      // Initialize map
+      mapRef.current = L.map("map", {
+        zoomControl: false,
+      }).setView([41.3111, 69.2406], 13)
+
+      // Add zoom control to top right
+      L.control.zoom({ position: "topright" }).addTo(mapRef.current)
 
       // Create base layers
       layersRef.current.street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -49,56 +55,52 @@ export function MapComponent({ onAreaSelect, savedArea }) {
         Gibrid: layersRef.current.hybrid,
       }
 
-      L.control.layers(baseMaps).addTo(mapRef.current)
+      L.control.layers(baseMaps, null, { position: "topright" }).addTo(mapRef.current)
       layersRef.current.street.addTo(mapRef.current)
 
-      // Setup draw controls
+      // Initialize drawing feature group
       drawnItemsRef.current = new L.FeatureGroup()
       mapRef.current.addLayer(drawnItemsRef.current)
-
-      const drawControl = new L.Control.Draw({
-        draw: {
-          polygon: true,
-          polyline: false,
-          rectangle: false,
-          circle: false,
-          marker: false,
-          circlemarker: false,
-        },
-        edit: {
-          featureGroup: drawnItemsRef.current,
-        },
-      })
-      mapRef.current.addControl(drawControl)
-
-      mapRef.current.on(L.Draw.Event.CREATED, (e) => {
-        const layer = e.layer
-        drawnItemsRef.current?.addLayer(layer)
-        const area = L.GeometryUtil.geodesicArea(layer.getLatLngs()[0])
-        onAreaSelect(area / 10000) // Convert square meters to hectares
-      })
     }
 
-    // Load saved area if provided
-    if (savedArea && mapRef.current && drawnItemsRef.current) {
+    // Load initial polygon if provided
+    if (initialPolygon?.geometry?.coordinates?.[0] && mapRef.current && drawnItemsRef.current) {
       // Clear existing drawings
       drawnItemsRef.current.clearLayers()
 
-      // Create polygon from saved coordinates
-      const polygon = L.polygon(savedArea.coordinates, {
-        color: "green",
-        fillColor: "#3388ff",
-        fillOpacity: 0.2,
-      })
+      try {
+        // Create polygon from GeoJSON
+        const layer = L.geoJSON(initialPolygon, {
+          style: {
+            color: "#1890ff", // Ant Design primary color
+            fillColor: "#1890ff",
+            fillOpacity: 0.2,
+            weight: 2,
+          },
+        })
 
-      // Add polygon to the map
-      drawnItemsRef.current.addLayer(polygon)
+        // Add polygon to the map
+        drawnItemsRef.current.addLayer(layer)
 
-      // Fit map bounds to show the polygon
-      mapRef.current.fitBounds(polygon.getBounds())
+        // Fit map bounds to show the polygon
+        mapRef.current.fitBounds(layer.getBounds())
 
-      // Display the area
-      onAreaSelect(savedArea.area)
+        // Calculate area
+        const latLngs = initialPolygon.geometry.coordinates[0].map((coord) => L.latLng(coord[1], coord[0]))
+        const area = L.GeometryUtil.geodesicArea(latLngs)
+        const hectares = (area / 10000).toFixed(2)
+
+        // Add area information popup
+        layer
+          .bindPopup(`
+            <div style="text-align: center">
+              <strong>Maydon:</strong> ${hectares} gektar
+            </div>
+          `)
+          .openPopup()
+      } catch (error) {
+        console.error("Error loading polygon:", error)
+      }
     }
 
     return () => {
@@ -107,18 +109,17 @@ export function MapComponent({ onAreaSelect, savedArea }) {
         mapRef.current = null
       }
     }
-  }, [onAreaSelect, savedArea])
+  }, [initialPolygon])
 
+  // Handle map type changes
   useEffect(() => {
     if (mapRef.current) {
-      // Remove all current layers
       Object.values(layersRef.current).forEach((layer) => {
         if (layer) {
           mapRef.current?.removeLayer(layer)
         }
       })
 
-      // Add the selected layer
       switch (mapType) {
         case "street":
           layersRef.current.street?.addTo(mapRef.current)
@@ -135,26 +136,17 @@ export function MapComponent({ onAreaSelect, savedArea }) {
 
   return (
     <div>
-      <div className="mb-4">
-        <button
-          className={`px-4 py-2 mr-2 ${mapType === "street" ? "bg-blue-500 text-white" : "bg-gray-200"}`}
-          onClick={() => setMapType("street")}
-        >
+      <Space className="mb-4">
+        <Button type={mapType === "street" ? "primary" : "default"} onClick={() => setMapType("street")}>
           Ko'cha
-        </button>
-        <button
-          className={`px-4 py-2 mr-2 ${mapType === "satellite" ? "bg-blue-500 text-white" : "bg-gray-200"}`}
-          onClick={() => setMapType("satellite")}
-        >
+        </Button>
+        <Button type={mapType === "satellite" ? "primary" : "default"} onClick={() => setMapType("satellite")}>
           Sun'iy yo'ldosh
-        </button>
-        <button
-          className={`px-4 py-2 ${mapType === "hybrid" ? "bg-blue-500 text-white" : "bg-gray-200"}`}
-          onClick={() => setMapType("hybrid")}
-        >
+        </Button>
+        <Button type={mapType === "hybrid" ? "primary" : "default"} onClick={() => setMapType("hybrid")}>
           Gibrid
-        </button>
-      </div>
+        </Button>
+      </Space>
       <div id="map" className="h-[400px] w-full rounded-lg border" />
     </div>
   )
