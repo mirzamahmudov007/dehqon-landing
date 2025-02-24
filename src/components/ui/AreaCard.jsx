@@ -31,7 +31,7 @@ export function AreaCard({ id, imageUrl, title, area, pricePerHectare }) {
             <div className="p-4">
                 <h3 className="text-lg font-semibold text-gray-800 mb-2">{title}</h3>
                 <div className="text-sm text-gray-600 mb-4">
-                    <p>Umumiy maydon: {formatNumber(area)} gektar</p>
+                    <p>Umumiy maydon: {formatNumber(Number(area).toFixed(2))} gektar</p>
                     <p>Narxi: {formatNumber(pricePerHectare)} so'm/gektar</p>
                 </div>
                 <Button

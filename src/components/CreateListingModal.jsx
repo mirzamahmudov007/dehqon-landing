@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Modal, Input, InputNumber, Select } from "antd"
 import { MapWritePolygon } from "./MapWritePolygon"
+import axios from "axios"
 
 const { TextArea } = Input
 
@@ -25,6 +26,15 @@ export function CreateListingModal({ isOpen, onClose }) {
         }
 
         console.log(listingData)
+        let obj = {
+            selectedArea: listingData.selectedArea,
+            pricePerHectare: listingData.pricePerHectare,
+            description: listingData.description,
+            region: listingData.description,
+            district: listingData.district,
+            polygonGeoJSON: JSON.stringify(listingData.polygonGeoJSON)
+        }
+        axios.post("http://localhost:9090/lands/add/1" , obj)
         onClose()
     }
 
